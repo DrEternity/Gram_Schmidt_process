@@ -76,11 +76,12 @@ double check_unitary(double *A, int n) {
 }
 
 
-void mult_block_A_B(double *A, double *B, double *res, int n_A, int m_A, int n_B, int m_B) {
+void mult_block_A_B(double *A, double *B, double *res, int n_A, int m_A, int n_B, int m_B, int i_B, int j_B, int row_B) {
+    // B - матрица c row_B строками, из которой выделяет подматрицу с левым углом в элементе (i_B, j_B)
     for(int k = 0; k < m_B; k++) {
         for(int i = 0; i < m_A; i++) {
             for(int j = 0; j < n_A; j++) {
-                res[k * n_A + j] += A[i * n_A + j] * B[k * n_B + i];
+                res[k * n_A + j] += A[i * n_A + j] * B[(k + j_B) * row_B + (i + i_B)];
             }
         }
     }
@@ -108,6 +109,15 @@ void copy_to_ram(double *A, double *destination, int i, int j, int n_A, int m_A,
 }
 
 
+void return_from_ram(double *C, double *ram, int row_C, int row_block, int col_block, int i, int j) {
+    for(int w1 = 0; w1 < col_block; w1++) {
+        for (int w2 = 0; w2 < row_block; w2++) {
+            C[(j + w1) * row_C + (i + w2)] += ram[w1 * row_block + w2];
+            ram[w1 * row_block + w2] = 0;
+        }
+    }
+}
+
 void mult_A_B(double *A, int row_A, int col_A, int n_A, int m_A, // rowA, colA - количество строк в матрице (структуре) A 
               double *B, int row_B, int col_B, int n_B, int m_B, // A - указатель на подматрицу в выделенной структуре
               double *C, int row_C, int col_C, int n_C, int m_C, // n_A, m_A - количество строк и столбцов в матрице A
@@ -126,58 +136,24 @@ void mult_A_B(double *A, int row_A, int col_A, int n_A, int m_A, // rowA, colA -
         for (int k = 0; k < m_A - (m_A % size_block); k += size_block) {
             copy_to_ram(A, block_A, i, k, row_A, col_A, size_block, size_block, transpose);
             for (int j = 0; j < m_B - (m_B % size_block); j += size_block) {
-                double block_B[size_block * size_block];
-                copy_to_ram(B, block_B, k, j, row_B, col_B, size_block, size_block);
-                mult_block_A_B(block_A, block_B, block_res, size_block, size_block, size_block, size_block);    
-                 
-                for(int w1 = 0; w1 < size_block; w1++) {
-                    for (int w2 = 0; w2 < size_block; w2++) {
-                        C[(j + w1) * row_C + (i + w2)] += block_res[w1 * size_block + w2];
-                        block_res[w1 * size_block + w2] = 0;
-                    }
-                }
+                mult_block_A_B(block_A, B, block_res, size_block, size_block, size_block, size_block, k, j, row_B); 
+                return_from_ram(C, block_res, row_C, size_block, size_block, i, j);
             }
             if (m_B % size_block > 0) { // остаточные блоки с уменьшенным количеством стоблцов 
-                double block_B[size_block * size_block];
-                copy_to_ram(B, block_B, k, m_B - (m_B % size_block), row_B, col_B, size_block, m_B % size_block, false);
-                mult_block_A_B(block_A, block_B, block_res, size_block, size_block, size_block, m_B % size_block); 
+                mult_block_A_B(block_A, B, block_res, size_block, size_block, size_block, m_B % size_block, k, m_B - (m_B % size_block), row_B); 
             }
-
-            for(int w1 = 0; w1 < m_B % size_block; w1++) {
-                for (int w2 = 0; w2 < size_block; w2++) {
-                    C[((m_B - (m_B % size_block)) + w1) * row_C + (i + w2)] += block_res[w1 * size_block + w2];
-                    block_res[w1 * size_block + w2] = 0;
-                }
-            }
+            return_from_ram(C, block_res, row_C, size_block, m_B % size_block, i, m_B - (m_B % size_block));
         }
         if (m_A % size_block > 0) {
-            copy_to_ram(A, block_A, i, m_A - (m_A % size_block), row_A, col_A, size_block, m_A % size_block, transpose);
-             
+            copy_to_ram(A, block_A, i, m_A - (m_A % size_block), row_A, col_A, size_block, m_A % size_block, transpose); 
             for (int j = 0; j < m_B - (m_B % size_block); j += size_block) {
-                double block_B[size_block * size_block];
-                copy_to_ram(B, block_B, m_A - (m_A % size_block), j, row_B, col_B, m_A % size_block, size_block);
-                mult_block_A_B(block_A, block_B, block_res, size_block, m_A % size_block, m_A % size_block, size_block);    
-                
-                for(int w1 = 0; w1 < size_block; w1++) {
-                    for (int w2 = 0; w2 < size_block; w2++) {
-                        C[(j + w1) * row_C + (i + w2)] += block_res[w1 * size_block + w2];
-                        block_res[w1 * size_block + w2] = 0;
-                    }
-                }
+                mult_block_A_B(block_A, B, block_res, size_block, m_A % size_block, m_A % size_block, size_block, m_A - (m_A % size_block), j, row_B);  
+                return_from_ram(C, block_res, row_C, size_block, size_block, i, j);
             }
-
             if (m_B % size_block > 0) { // остаточные блоки с уменьшенным количеством стоблцов 
-                double block_B[size_block * size_block];
-                copy_to_ram(B, block_B, m_A - (m_A % size_block), m_B - (m_B % size_block), row_B, col_B, m_A % size_block, m_B % size_block, false);
-                mult_block_A_B(block_A, block_B, block_res, size_block, m_A % size_block, m_A % size_block, m_B % size_block); 
+                mult_block_A_B(block_A, B, block_res, size_block, m_A % size_block, m_A % size_block, m_B % size_block, m_A - (m_A % size_block), m_B - (m_B % size_block), row_B); 
             }
-
-            for(int w1 = 0; w1 < m_B % size_block; w1++) {
-                for (int w2 = 0; w2 < size_block; w2++) {
-                    C[((m_B - (m_B % size_block)) + w1) * row_C + (i + w2)] += block_res[w1 * size_block + w2];
-                    block_res[w1 * size_block + w2] = 0;
-                }
-            }
+            return_from_ram(C, block_res, row_C, size_block, m_B % size_block, i, m_B - (m_B % size_block));
         }
     }
 
@@ -185,56 +161,24 @@ void mult_A_B(double *A, int row_A, int col_A, int n_A, int m_A, // rowA, colA -
         for (int k = 0; k < m_A - (m_A % size_block); k += size_block) {
             copy_to_ram(A, block_A, n_A - (n_A % size_block), k, row_A, col_A, n_A % size_block, size_block, transpose);
             for (int j = 0; j < m_B - (m_B % size_block); j += size_block) {
-                double block_B[size_block * size_block];
-                copy_to_ram(B, block_B, k, j, row_B, col_B, size_block, size_block);
-                mult_block_A_B(block_A, block_B, block_res, n_A % size_block, size_block, size_block, size_block);    
-                
-                for(int w1 = 0; w1 < size_block; w1++) {
-                    for (int w2 = 0; w2 < n_A % size_block; w2++) {
-                        C[(j + w1) * row_C + (n_A - (n_A % size_block) + w2)] += block_res[w1 * (n_A % size_block) + w2];
-                        block_res[w1 * (n_A % size_block) + w2] = 0;
-                    }
-                }
+                mult_block_A_B(block_A, B, block_res, n_A % size_block, size_block, size_block, size_block, k, j, row_B); 
+                return_from_ram(C, block_res, row_C, n_A % size_block, size_block, n_A - (n_A % size_block), j);
             }
-            if (m_B % size_block > 0) { // остаточные блоки с уменшенным количеством стоблцов 
-                double block_B[size_block * size_block];
-                copy_to_ram(B, block_B, k, m_B - (m_B % size_block), row_B, col_B, size_block, m_B % size_block, false);
-                mult_block_A_B(block_A, block_B, block_res, n_A % size_block, size_block, size_block, m_B % size_block); 
+            if (m_B % size_block > 0) { // остаточные блоки с уменьшенным количеством стоблцов 
+                mult_block_A_B(block_A, B, block_res, n_A % size_block, size_block, size_block, m_B % size_block, k, m_B - (m_B % size_block), row_B); 
             }
-
-            for(int w1 = 0; w1 < m_B % size_block; w1++) {
-                for (int w2 = 0; w2 < n_A % size_block; w2++) {
-                    C[((m_B - (m_B % size_block)) + w1) * row_C + (n_A - (n_A % size_block) + w2)] += block_res[w1 * (n_A % size_block) + w2];
-                    block_res[w1 * (n_A % size_block) + w2] = 0;
-                }
-            }
+            return_from_ram(C, block_res, row_C, n_A % size_block, m_B % size_block, n_A - (n_A % size_block), m_B - (m_B % size_block));
         }
         if (m_A % size_block > 0) {
             copy_to_ram(A, block_A, n_A - (n_A % size_block), m_A - (m_A % size_block), row_A, col_A, n_A % size_block, m_A % size_block, transpose);
             for (int j = 0; j < m_B - (m_B % size_block); j += size_block) {
-                double block_B[size_block * size_block];
-                copy_to_ram(B, block_B, m_A - (m_A % size_block), j, row_B, col_B, m_A % size_block, size_block);
-                mult_block_A_B(block_A, block_B, block_res, n_A % size_block, m_A % size_block, m_A % size_block, size_block);    
-                
-                for(int w1 = 0; w1 < size_block; w1++) {
-                    for (int w2 = 0; w2 < n_A % size_block; w2++) {
-                        C[(j + w1) * row_C + (n_A - (n_A % size_block) + w2)] += block_res[w1 * (n_A % size_block) + w2];
-                        block_res[w1 * (n_A % size_block) + w2] = 0;
-                    }
-                }
+                mult_block_A_B(block_A, B, block_res, n_A % size_block, m_A % size_block, m_A % size_block, size_block, m_A - (m_A % size_block), j, row_B); 
+                return_from_ram(C, block_res, row_C, n_A % size_block, size_block, n_A - (n_A % size_block), j);
             }
             if (m_B % size_block > 0) { // остаточные блоки с уменьшенным количеством стоблцов 
-                double block_B[size_block * size_block];
-                copy_to_ram(B, block_B, m_A - (m_A % size_block), m_B - (m_B % size_block), row_B, col_B, m_A % size_block, m_B % size_block, false);
-                mult_block_A_B(block_A, block_B, block_res, n_A % size_block, m_A % size_block, m_A % size_block, m_B % size_block); 
+                mult_block_A_B(block_A, B, block_res, n_A % size_block, m_A % size_block, m_A % size_block, m_B % size_block, m_A - (m_A % size_block), m_B - (m_B % size_block), row_B); 
             }
-
-            for(int w1 = 0; w1 < m_B % size_block; w1++) {
-                for (int w2 = 0; w2 < n_A % size_block; w2++) {
-                    C[((m_B - (m_B % size_block)) + w1) * row_C + (n_A - (n_A % size_block) + w2)] += block_res[w1 * (n_A % size_block) + w2];
-                    block_res[w1 * (n_A % size_block) + w2] = 0;
-                }
-            }
+            return_from_ram(C, block_res, row_C, n_A % size_block, m_B % size_block, n_A - (n_A % size_block), m_B - (m_B % size_block));
         }
     }
 }
@@ -309,11 +253,11 @@ int main() {
     auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(end - begin);
     std::cout << "The time: " << elapsed_ms.count() << " ms\n";
 
-    /*
-    double *C = (double *) malloc(n * n * sizeof(double));
-    matmul_checker(Q, R, C, n);
-    cout << "||A - QR|| = " << Frob(C, A, n, n) << endl; 
-    cout << "Unitary: " << check_unitary(Q, n) << endl; 
-    */
+    
+    //double *C = (double *) malloc(n * n * sizeof(double));
+    //matmul_checker(Q, R, C, n);
+    //cout << "||A - QR|| = " << Frob(C, A, n, n) << endl; 
+    //cout << "Unitary: " << check_unitary(Q, n) << endl; 
+    
     return 0;
 }
