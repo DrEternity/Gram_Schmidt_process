@@ -8,4 +8,6 @@
 - LAPACK Fortran
 - LAPACK C++
 
+Результаты численных экспериментов приведены в [отчёте](https://github.com/DrEternity/Gram_Schmidt_process/blob/main/presentation.pdf)
+
 ![Псевдокод алгоритма:](https://github.com/DrEternity/Gram_Schmidt_process/blob/main/pseudocode.jpg?raw=true)
